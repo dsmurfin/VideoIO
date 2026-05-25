@@ -47,6 +47,20 @@ extension Camera {
     }
     
     @available(macOS, unavailable)
+    public func setFocusPointOfInterest(to devicePoint: CGPoint, focusMode: AVCaptureDevice.FocusMode = .continuousAutoFocus, shouldMonitorSubjectAreaChange: Bool = false) throws {
+        guard let videoDevice = self.videoDevice else {
+            return
+        }
+        try videoDevice.lockForConfiguration()
+        if videoDevice.isFocusPointOfInterestSupported && videoDevice.isFocusModeSupported(focusMode) {
+            videoDevice.focusPointOfInterest = devicePoint
+            videoDevice.focusMode = focusMode
+        }
+        videoDevice.isSubjectAreaChangeMonitoringEnabled = shouldMonitorSubjectAreaChange
+        videoDevice.unlockForConfiguration()
+    }
+    
+    @available(macOS, unavailable)
     public func setExposureTargetBias(_ bias: Float, completion: ((CMTime) -> Void)? = nil) throws {
         guard let device = self.videoDevice else {
             return

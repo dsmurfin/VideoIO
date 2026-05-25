@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(xcodebuild -scheme VideoIO -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build)"
+    ]
+  }
+}
