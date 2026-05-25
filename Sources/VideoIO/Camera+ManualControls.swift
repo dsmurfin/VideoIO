@@ -164,7 +164,16 @@ extension Camera {
     /// The current white balance as temperature (Kelvin) and tint, or `nil` if no video device is configured.
     public var currentWhiteBalanceTemperatureAndTint: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues? {
         guard let device = self.videoDevice else { return nil }
-        return device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+        let gains = device.deviceWhiteBalanceGains
+        let maxGain = device.maxWhiteBalanceGain
+        // the system may briefly report sub-unity gains during capture session
+        // startup or immediately after a white-balance mode change
+        guard (1...maxGain).contains(gains.redGain),
+              (1...maxGain).contains(gains.greenGain),
+              (1...maxGain).contains(gains.blueGain) else {
+            return nil
+        }
+        return device.temperatureAndTintValues(for: gains)
     }
 
     // MARK: - Supported Ranges
