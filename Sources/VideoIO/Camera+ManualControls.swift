@@ -150,6 +150,11 @@ extension Camera {
     public var currentExposureTargetBias: Float? {
         return self.videoDevice?.exposureTargetBias
     }
+    
+    /// The current exposure target offset (EV), or `nil` if no video device is configured.
+    public var currentExposureTargetOffset: Float? {
+        videoDevice?.exposureTargetOffset
+    }
 
     /// The current white balance mode, or `nil` if no video device is configured.
     public var currentWhiteBalanceMode: AVCaptureDevice.WhiteBalanceMode? {
