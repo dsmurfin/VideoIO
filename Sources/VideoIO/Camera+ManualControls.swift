@@ -33,7 +33,7 @@ extension Camera {
     /// The value is clamped to `[0.0, 1.0]`. Switches the device to `.locked` focus mode.
     public func setLensPosition(_ position: Float, completion: ((CMTime) -> Void)? = nil) throws {
         guard let device = self.videoDevice else { throw ManualControlError.noVideoDevice }
-        guard device.isFocusModeSupported(.locked) else { throw ManualControlError.modeNotSupported }
+        guard device.isLockingFocusWithCustomLensPositionSupported else { throw ManualControlError.modeNotSupported }
         let clamped = simd_clamp(position, 0.0, 1.0)
         try device.lockForConfiguration()
         device.setFocusModeLocked(lensPosition: clamped, completionHandler: completion)
@@ -216,6 +216,11 @@ extension Camera {
 
     public func isFocusModeSupported(_ mode: AVCaptureDevice.FocusMode) -> Bool {
         return self.videoDevice?.isFocusModeSupported(mode) ?? false
+    }
+    
+    /// Whether the device supports locking focus using a specific lens position (required for `setLensPosition(_:completion:)`).
+    public var isLockingFocusWithCustomLensPositionSupported: Bool {
+        return self.videoDevice?.isLockingFocusWithCustomLensPositionSupported ?? false
     }
 
     public func isExposureModeSupported(_ mode: AVCaptureDevice.ExposureMode) -> Bool {
