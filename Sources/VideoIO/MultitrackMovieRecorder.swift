@@ -70,7 +70,14 @@ public final class MultitrackMovieRecorder {
         public var numberOfAudioTracks: Int
         
         public var shouldOptimizeForNetworkUse: Bool
-        
+
+        /// The frequency at which movie fragments are written, for file types that support them.
+        /// The default value is `.invalid`, which disables movie fragments. When set to a valid,
+        /// positive time, a partially written file remains playable up to the last written fragment
+        /// if writing is interrupted (e.g. by a crash). On successful completion the fragments are
+        /// consolidated into a regular movie file.
+        public var movieFragmentInterval: CMTime = .invalid
+
         @available(*, deprecated, renamed: "init(numberOfVideoTracks:numberOfAudioTracks:shouldOptimizeForNetworkUse:)")
         public init(videoTrackCount: Int, audioTrackCount: Int, optimizeForNetworkUse: Bool = true) {
             numberOfVideoTracks = videoTrackCount
@@ -146,6 +153,7 @@ public final class MultitrackMovieRecorder {
         self.assetWriter = try AVAssetWriter(url: url, fileType: fileType)
         self.assetWriter.metadata = self.configuration.metadata
         self.assetWriter.shouldOptimizeForNetworkUse = configuration.shouldOptimizeForNetworkUse
+        self.assetWriter.movieFragmentInterval = configuration.movieFragmentInterval
     }
     
     private func checkError() throws {
@@ -531,7 +539,14 @@ public final class MovieRecorder {
         
         /// Set to `true` to write the file in a way that is more suitable for playback over a network.
         public var shouldOptimizeForNetworkUse: Bool
-        
+
+        /// The frequency at which movie fragments are written, for file types that support them.
+        /// The default value is `.invalid`, which disables movie fragments. When set to a valid,
+        /// positive time, a partially written file remains playable up to the last written fragment
+        /// if writing is interrupted (e.g. by a crash). On successful completion the fragments are
+        /// consolidated into a regular movie file.
+        public var movieFragmentInterval: CMTime = .invalid
+
         public init(hasAudio: Bool, shouldOptimizeForNetworkUse: Bool = true) {
             self.hasAudio = hasAudio
             self.shouldOptimizeForNetworkUse = shouldOptimizeForNetworkUse
@@ -547,6 +562,7 @@ public final class MovieRecorder {
         internalConfiguration.videoOrientation = configuration.videoOrientation
         internalConfiguration.videoSettings = configuration.videoSettings
         internalConfiguration.audioSettings = configuration.audioSettings
+        internalConfiguration.movieFragmentInterval = configuration.movieFragmentInterval
         self.internalRecorder = try MultitrackMovieRecorder(url: url, configuration: internalConfiguration)
     }
     
