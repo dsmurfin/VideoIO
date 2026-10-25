@@ -30,7 +30,9 @@ public final class MultitrackMovieRecorder {
         case invalidBufferCount
         case invalidMediaType
         case differentPresentationTimeStamp
-        
+        case invalidPresentationTimeStamp
+        case nonIncreasingPresentationTimeStamp
+
         public var errorDescription: String? {
             switch self {
             case .invalidMediaType:
@@ -39,6 +41,10 @@ public final class MultitrackMovieRecorder {
                 return "Invalid buffer count."
             case .differentPresentationTimeStamp:
                 return "Buffers must have the same PTS."
+            case .invalidPresentationTimeStamp:
+                return "Buffers must have a valid PTS."
+            case .nonIncreasingPresentationTimeStamp:
+                return "Buffers must have a PTS later than the previous buffers."
             }
         }
     }
@@ -127,10 +133,19 @@ public final class MultitrackMovieRecorder {
     
     public var sampleWritingSessionStartedHandler: ((_ sampleWritingSessionStartTime: CMTime) -> Void)?
     public var durationChangedHandler: ((_ duration: CMTime) -> Void)?
-    
+
+    /// Called once on the main queue when the recorder fails, including when its inputs cannot be set up.
+    /// Not called for an error which only occurs while stopping.
+    public var failureHandler: ((_ error: Error) -> Void)?
+
     private var lastVideoSampleTime: CMTime = .invalid
     private var recordingStartSampleTime: CMTime = .invalid
-    
+
+    // The latest presentation times accepted for each media type, in the order buffers are enqueued.
+    private var lastSubmittedVideoTime: CMTime = .invalid
+    private var lastSubmittedAudioTime: CMTime = .invalid
+    private let submissionLock = UnfairLock()
+
     public let configuration: Configuration
     
     private var error: Error?
@@ -163,7 +178,18 @@ public final class MultitrackMovieRecorder {
             throw error
         }
     }
-    
+
+    /// Accepts `time` as the latest submitted presentation time, or throws if it is invalid or does not increase.
+    private static func submitPresentationTime(_ time: CMTime, after lastTime: inout CMTime) throws {
+        guard time.isNumeric else {
+            throw BufferAppendingError.invalidPresentationTimeStamp
+        }
+        if lastTime.isNumeric && time <= lastTime {
+            throw BufferAppendingError.nonIncreasingPresentationTimeStamp
+        }
+        lastTime = time
+    }
+
     public func appendVideoSampleBuffers(_ sampleBuffers: [CMSampleBuffer]) throws {
         try checkError()
         
@@ -180,6 +206,10 @@ public final class MultitrackMovieRecorder {
             return
         }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffers.first!)
+        // held until the buffers are enqueued, so the order of accepted timestamps is the order they are appended
+        self.submissionLock.lock()
+        defer { self.submissionLock.unlock() }
+        try Self.submitPresentationTime(presentationTime, after: &self.lastSubmittedVideoTime)
         self.queue.async {
             //no `errorLock` is required here because the `error` can only be assigned on `self.queue`
             guard self.stopped == false, self.error == nil else {
@@ -228,10 +258,9 @@ public final class MultitrackMovieRecorder {
             
             if self.assetWriter.status == .unknown {
                 if !self.assetWriter.startWriting() {
-                    if let error = self.assetWriter.error {
-                        self.transitionToFailedStatus(error: error)
-                        return
-                    }
+                    // a session must not be started on a writer which is not writing
+                    self.transitionToFailedStatus(error: self.assetWriter.error ?? RecorderError.unexpectedAssetWriterStatus)
+                    return
                 }
                 
                 self.assetWriter.startSession(atSourceTime: presentationTime)
@@ -241,7 +270,13 @@ public final class MultitrackMovieRecorder {
                     self.sampleWritingSessionStartedHandler?(presentationTime)
                 }
             }
-            
+
+            // the writer can fail between appends, after which every buffer would otherwise be dropped silently
+            if self.assetWriter.status == .failed {
+                self.transitionToFailedStatus(error: self.assetWriter.error ?? RecorderError.unexpectedAssetWriterStatus)
+                return
+            }
+
             if self.assetWriter.status == .writing {
                 if self.videoInputs.map(\.isReadyForMoreMediaData).reduce(true, { $0 && $1 }) {
                     for (index, sampleBuffer) in sampleBuffers.enumerated() {
@@ -290,6 +325,10 @@ public final class MultitrackMovieRecorder {
         }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffers.first!)
         let duration = CMSampleBufferGetDuration(sampleBuffers.first!)
+        // held until the buffers are enqueued, so the order of accepted timestamps is the order they are appended
+        self.submissionLock.lock()
+        defer { self.submissionLock.unlock() }
+        try Self.submitPresentationTime(presentationTime, after: &self.lastSubmittedAudioTime)
         self.queue.async {
             //no `errorLock` is required here because the `error` can only be assigned on `self.queue`
             guard self.stopped == false, self.error == nil else {
@@ -346,7 +385,13 @@ public final class MultitrackMovieRecorder {
             guard self.videoInputs.count == self.configuration.numberOfVideoTracks && self.audioInputs.count == self.configuration.numberOfAudioTracks else {
                 return
             }
-            
+
+            // the writer can fail between appends, after which every buffer would otherwise be dropped silently
+            if self.assetWriter.status == .failed {
+                self.transitionToFailedStatus(error: self.assetWriter.error ?? RecorderError.unexpectedAssetWriterStatus)
+                return
+            }
+
             if self.assetWriter.status == .writing {
                 do {
                     try self.tryAppendingPendingAudioBuffers()
@@ -476,6 +521,9 @@ public final class MultitrackMovieRecorder {
         self.errorLock.lock()
         self.error = error
         self.errorLock.unlock()
+        DispatchQueue.main.async {
+            self.failureHandler?(error)
+        }
     }
 }
 
@@ -521,7 +569,17 @@ public final class MovieRecorder {
             internalRecorder.durationChangedHandler = newValue
         }
     }
-    
+
+    /// Called once on the main queue when the recorder fails.
+    public var failureHandler: ((_ error: Error) -> Void)? {
+        get {
+            internalRecorder.failureHandler
+        }
+        set {
+            internalRecorder.failureHandler = newValue
+        }
+    }
+
     public struct Configuration {
         public var metadata: [AVMetadataItem] = []
         
